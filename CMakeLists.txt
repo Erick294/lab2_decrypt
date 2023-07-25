@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(lab02)
+project(lab2_decrypt)
 
 set(CMAKE_CXX_STANDARD 17)
 

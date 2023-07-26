@@ -42,7 +42,6 @@ std::string from_base64(std::string str) {
 
 int main(int argc, char** argv) {
     // texto en formato BASE64
-    std::string cipher_text = "3CC4M6vAfC92tf7vIkRzXC9bOZKtT6q6jz0ewyv4niBO7M8jHcdmi+h2yNq4KRJO2TzgL0dZbcwnrZMHClLJHQ==";
     const char* text_to_find = "cryptographic";
 
     MPI_Init(&argc, &argv);
@@ -57,6 +56,7 @@ int main(int argc, char** argv) {
 
     long start_index = rank_id*block_size;
     long end_index = (rank_id+1)*block_size;
+    int text_size;
 
     if (rank == 0) {
         std::ifstream file("example.txt");
@@ -64,66 +64,88 @@ int main(int argc, char** argv) {
         std::getline(file, str);
         file.close();
 
-        for (int i = 1; i < size; ++i) {
-            int start = (i - 1) * data.size() / (size - 1);
-            int end = i * data.size() / (size - 1);
-            MPI_Send(&data[start], end - start, MPI_INT, i, 0, MPI_COMM_WORLD);
+        text_size = str.size();
+
+        MPI_Bcast(&text_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+        long key_found = 0;
+        long test_key;
+
+        MPI_Request  req;
+        MPI_Status st;
+        MPI_Irecv(&key_found, 1, MPI_LONG, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &req);
+
+        CryptoPP::byte* ptr = (CryptoPP::byte* )str.c_str();
+
+        std::vector<CryptoPP::byte> out_buffer(text_size, 0);
+
+        long cc = 0;
+        int flag;
+        for(test_key=start_index;test_key<end_index && !key_found;test_key++) {
+            DES_decrypt((char *)&test_key, ptr, clen,out_buffer.data() );
+
+            if( std::strstr((char *)out_buffer.data(), text_to_find) ) {
+                key_found = test_key;
+
+                //notificar
+                for(int node=1;node<nprocs;node++) {
+                    fmt::print(fg(fmt::color::green), "notificando rank_{}\n", node);
+                    MPI_Send(&key_found,1, MPI_LONG, node, 0, MPI_COMM_WORLD);
+                }
+                break;
+            }
+
+        for (int i = 1; i < nprocs; i++) {
+            MPI_Send(&str[0], text_size, MPI_CHAR, i, 0, MPI_COMM_WORLD);
         }
     } else {
-        int count;
-        MPI_Status status;
-        MPI_Probe(0, 0, MPI_COMM_WORLD, &status);
-        MPI_Get_count(&status, MPI_INT, &count);
-        std::vector<int> data(count);
-        MPI_Recv(data.data(), count, MPI_INT, 0, 0, MPI_COMM_WORLD,
-                 MPI_STATUS_IGNORE);
+        std::string text;
+        MPI_Recv(&text, text_size, MPI_CHAR, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-        // Do something with the data.
-    }
-
-    if(rank_id==6) {
+        if(rank_id==6) {
         start_index = 7523094288207667809-10;
-    }
-
-    fmt::print(fg(fmt::color::gray), "rank {} check from {} to {}\n",
-               rank_id,start_index,end_index);
-
-    long key_found = 0;
-    long test_key;
-
-    MPI_Request  req;
-    MPI_Status st;
-    MPI_Irecv(&key_found, 1, MPI_LONG, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &req);
-
-    std::string text = from_base64(cipher_text);
-    int clen = text.size();
-    CryptoPP::byte* ptr = (CryptoPP::byte* )text.c_str();
-
-    std::vector<CryptoPP::byte> out_buffer(clen, 0);
-
-    long cc = 0;
-    int flag;
-    for(test_key=start_index;test_key<end_index && !key_found;test_key++) {
-        DES_decrypt((char *)&test_key, ptr, clen,out_buffer.data() );
-
-        if( std::strstr((char *)out_buffer.data(), text_to_find) ) {
-            key_found = test_key;
-
-            fmt::print(fg(fmt::color::green), "FOUND: rank_id={}\n", rank_id);
-
-            //notificar
-            for(int node=0;node<nprocs;node++) {
-                fmt::print(fg(fmt::color::green), "notificando rank_{}\n", node);
-                MPI_Send(&key_found,1, MPI_LONG, node, 0, MPI_COMM_WORLD);
-            }
-            break;
         }
 
-        if(++cc % 1000==0) {
-            MPI_Test(&req,&flag,&st);
-            if(flag) {
-                fmt::print(fg(fmt::color::red), "recv rank_{} desde el rank_{}\n", rank_id, st.MPI_SOURCE);
-                break ;
+        fmt::print(fg(fmt::color::gray), "rank {} check from {} to {}\n",
+                rank_id,start_index,end_index);
+
+        long key_found = 0;
+        long test_key;
+
+        MPI_Request  req;
+        MPI_Status st;
+        MPI_Irecv(&key_found, 1, MPI_LONG, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &req);
+
+        std::string txt = from_base64(text);
+        int clen = text.size();
+        CryptoPP::byte* ptr = (CryptoPP::byte* )text.c_str();
+
+        std::vector<CryptoPP::byte> out_buffer(clen, 0);
+
+        long cc = 0;
+        int flag;
+        for(test_key=start_index;test_key<end_index && !key_found;test_key++) {
+            DES_decrypt((char *)&test_key, ptr, clen,out_buffer.data() );
+
+            if( std::strstr((char *)out_buffer.data(), text_to_find) ) {
+                key_found = test_key;
+
+                fmt::print(fg(fmt::color::green), "FOUND: rank_id={}\n", rank_id);
+
+                //notificar
+                for(int node=0;node<nprocs;node++) {
+                    fmt::print(fg(fmt::color::green), "notificando rank_{}\n", node);
+                    MPI_Send(&key_found,1, MPI_LONG, node, 0, MPI_COMM_WORLD);
+                }
+                break;
+            }
+
+            if(++cc % 1000==0) {
+                MPI_Test(&req,&flag,&st);
+                if(flag) {
+                    fmt::print(fg(fmt::color::red), "recv rank_{} desde el rank_{}\n", rank_id, st.MPI_SOURCE);
+                    break ;
+                }
             }
         }
     }
@@ -143,7 +165,6 @@ int main(int argc, char** argv) {
         fmt::print(fg(fmt::color::green), "****** key found: {}\n", ffkey);
         fmt::print(fg(fmt::color::green), "****** org text : {}\n", (char *)out_buffer.data() );
     }
-
 
     MPI_Finalize();
 }

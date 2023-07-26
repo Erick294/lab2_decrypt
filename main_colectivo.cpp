@@ -43,6 +43,7 @@ std::string from_base64(std::string str) {
 int main(int argc, char** argv) {
     // texto en formato BASE64
     const char* text_to_find = "cryptographic";
+    std::string text;
 
     MPI_Init(&argc, &argv);
 
@@ -60,10 +61,85 @@ int main(int argc, char** argv) {
 
     if (rank == 0) {
         std::ifstream file("example.txt");
-        std::string str;
-        std::getline(file, str);
+        std::getline(file, text);
         file.close();
     }
 
+    text_size = text.size();
+
+    MPI_Bcast(&text_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+    // Resize cipher_text for all ranks
+    text.resize(text_size);
+
+    // Broadcast the content of cipher_text to all ranks
+    MPI_Bcast(&text[0], cipher_text_size, MPI_CHAR, 0, MPI_COMM_WORLD);
+
+    // Broadcast the block_size from RANK_0 to all ranks
+    MPI_Bcast(&block_size, 1, MPI_LONG, 0, MPI_COMM_WORLD);
+
+    if (rank_id == 6) {
+        start_index = 7523094288207667809 - 10;
+    }
+
+    fmt::print(fg(fmt::color::gray), "rank {} check from {} to {}\n",
+               rank_id, start_index, end_index);
+
+    long key_found = 0;
+    long test_key;
+
+    MPI_Request req;
+    MPI_Status st;
+    MPI_Irecv(&key_found, 1, MPI_LONG, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &req);
+
+    std::string txt = from_base64(text);
+    int clen = txt.size();
+    CryptoPP::byte *ptr = (CryptoPP::byte *) txt.c_str();
+
+    std::vector<CryptoPP::byte> out_buffer(clen, 0);
+
+    long cc = 0;
+    int flag;
+
+    for (test_key = start_index; test_key < end_index && !key_found; test_key++) {
+        DES_decrypt((char *) &test_key, ptr, clen, out_buffer.data());
+
+        if (std::strstr((char *) out_buffer.data(), text_to_find)) {
+            key_found = test_key;
+
+            fmt::print(fg(fmt::color::green), "FOUND: rank_id={}\n", rank_id);
+
+            //notificar
+            for (int node = 0; node < nprocs; node++) {
+                fmt::print(fg(fmt::color::green), "notificando rank_{}\n", node);
+                MPI_Send(&key_found, 1, MPI_LONG, node, 0, MPI_COMM_WORLD);
+            }
+            break;
+        }
+    }
+
+    if (++cc % 1000 == 0) {
+            MPI_Test(&req, &flag, &st);
+            if (flag) {
+                fmt::print(fg(fmt::color::red), "recv rank_{} desde el rank_{}\n", rank_id, st.MPI_SOURCE);
+                break;
+            }
+    }
     
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if (rank_id == 0) {
+        MPI_Wait(&req, &st);
+
+        DES_decrypt((char *) &key_found, ptr, clen, out_buffer.data());
+        char ffkey[9];
+        std::memcpy(ffkey, (char *) &key_found, 8);
+        ffkey[8] = 0;
+
+        fmt::print(fg(fmt::color::green), "****** key found: {}\n", ffkey);
+        fmt::print(fg(fmt::color::green), "****** org text : {}\n", (char *) out_buffer.data());
+    }
+
+    MPI_Finalize();
+
 }

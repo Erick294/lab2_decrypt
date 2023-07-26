@@ -13,5 +13,7 @@ find_package(MPI REQUIRED)
 message(STATUS "******Run: ${MPIEXEC}")
 
 add_executable(lab2 main.cpp)
+add_executable(lab mainex.cpp)
+
 target_link_libraries(lab2 fmt::fmt cryptopp MPI::MPI_CXX)
 

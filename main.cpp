@@ -1,4 +1,5 @@
 #include <iostream>
+#include <fstream>
 #include <fmt/core.h>
 #include <fmt/color.h>
 #include <cryptopp/des.h>
@@ -56,6 +57,29 @@ int main(int argc, char** argv) {
 
     long start_index = rank_id*block_size;
     long end_index = (rank_id+1)*block_size;
+
+    if (rank == 0) {
+        std::ifstream file("example.txt");
+        std::string str;
+        std::getline(file, str);
+        file.close();
+
+        for (int i = 1; i < size; ++i) {
+            int start = (i - 1) * data.size() / (size - 1);
+            int end = i * data.size() / (size - 1);
+            MPI_Send(&data[start], end - start, MPI_INT, i, 0, MPI_COMM_WORLD);
+        }
+    } else {
+        int count;
+        MPI_Status status;
+        MPI_Probe(0, 0, MPI_COMM_WORLD, &status);
+        MPI_Get_count(&status, MPI_INT, &count);
+        std::vector<int> data(count);
+        MPI_Recv(data.data(), count, MPI_INT, 0, 0, MPI_COMM_WORLD,
+                 MPI_STATUS_IGNORE);
+
+        // Do something with the data.
+    }
 
     if(rank_id==6) {
         start_index = 7523094288207667809-10;
